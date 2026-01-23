@@ -134,6 +134,15 @@ def format_reset_time(reset_time_str):
     except Exception as e:
         return reset_time_str
 
+def format_absolute_time(reset_time_str):
+    """Format the reset time as an absolute local time"""
+    try:
+        reset_time = datetime.fromisoformat(reset_time_str.replace('Z', '+00:00'))
+        local_time = reset_time.astimezone()  # Convert to local timezone
+        return local_time.strftime("%I:%M %p").lstrip("0")  # e.g., "3:45 PM"
+    except Exception:
+        return ""
+
 def run_newman():
     """Run Newman and export JSON output"""
     debug_log("Running Newman with collection:", COLLECTION_FILE)
@@ -467,9 +476,11 @@ class MenuBarApp(rumps.App):
                 # Update menu items with reset times
                 five_hour_reset_text = format_reset_time(usage_data["five_hour_reset"])
                 seven_day_reset_text = format_reset_time(usage_data["seven_day_reset"])
-                
-                self.menu["5-Hour Reset: Loading..."].title = f"5-Hour Reset: {five_hour_reset_text}"
-                self.menu["7-Day Reset: Loading..."].title = f"7-Day Reset: {seven_day_reset_text}"
+                five_hour_abs = format_absolute_time(usage_data["five_hour_reset"])
+                seven_day_abs = format_absolute_time(usage_data["seven_day_reset"])
+
+                self.menu["5-Hour Reset: Loading..."].title = f"5-Hour Reset: {five_hour_reset_text} ({five_hour_abs})"
+                self.menu["7-Day Reset: Loading..."].title = f"7-Day Reset: {seven_day_reset_text} ({seven_day_abs})"
             else:
                 usage_text = usage_text
         else:
