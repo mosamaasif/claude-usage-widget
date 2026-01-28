@@ -202,9 +202,13 @@ def get_usage_from_newman_json():
         five_hour_data = response_json.get("five_hour", {})
         seven_day_data = response_json.get("seven_day", {})
         
-        five_hour = five_hour_data.get("utilization", "N/A")
-        seven_day = seven_day_data.get("utilization", "N/A")
-        
+        five_hour_raw = five_hour_data.get("utilization", "N/A")
+        seven_day_raw = seven_day_data.get("utilization", "N/A")
+
+        # Round to whole numbers to conserve space
+        five_hour = round(five_hour_raw) if isinstance(five_hour_raw, (int, float)) else five_hour_raw
+        seven_day = round(seven_day_raw) if isinstance(seven_day_raw, (int, float)) else seven_day_raw
+
         five_hour_reset = five_hour_data.get("resets_at", "")
         seven_day_reset = seven_day_data.get("resets_at", "")
 
