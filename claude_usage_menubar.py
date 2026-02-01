@@ -8,6 +8,8 @@ from datetime import datetime
 import shlex
 import uuid
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 
 # Config
@@ -16,6 +18,12 @@ NEWMAN_OUTPUT_FILE = "output.json"
 UPDATE_INTERVAL = 180  # seconds, 3 minutes
 STATE_FILE = "notification_state.json"
 DEBUG = False  # Set False to disable logs
+CONFIG_FILE = "config.json"
+GIST_API_URL = "https://api.github.com/gists"
+
+def debug_log(*args, **kwargs):
+    if DEBUG:
+        print("[DEBUG]", *args, **kwargs)
 
 # Read cURL command from file
 CURL_FILE = "curl.txt"
@@ -31,11 +39,6 @@ if not CURL_COMMAND:
 
 # Notification thresholds
 THRESHOLDS = [25, 50, 75, 90]
-
-def debug_log(*args, **kwargs):
-    if DEBUG:
-        print("[DEBUG]", *args, **kwargs)
-
 
 def load_notification_state():
     """Load the state of which notifications have been sent"""
@@ -54,6 +57,86 @@ def save_notification_state(state):
     """Save the notification state to disk"""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
+
+def load_config():
+    """Load Gist config from disk. Returns dict or None if missing/invalid."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+            if config.get("github_token"):
+                return config
+        except:
+            pass
+    return None
+
+def save_config(config):
+    """Save config back to disk (e.g. to persist gist_id after first creation)"""
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
+
+def _create_gist(token, content):
+    """Create a new secret Gist. Returns (raw_url, gist_id)."""
+    payload = json.dumps({
+        "description": "Claude Usage Data",
+        "public": False,
+        "files": {
+            "claude_usage.json": {"content": content}
+        }
+    }).encode("utf-8")
+    req = Request(GIST_API_URL, data=payload, method="POST")
+    req.add_header("Authorization", f"token {token}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/vnd.github.v3+json")
+    with urlopen(req) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    gist_id = data["id"]
+    raw_url = data["files"]["claude_usage.json"]["raw_url"]
+    return raw_url, gist_id
+
+def _update_gist(token, gist_id, content):
+    """Update an existing Gist. Returns raw_url."""
+    payload = json.dumps({
+        "files": {
+            "claude_usage.json": {"content": content}
+        }
+    }).encode("utf-8")
+    req = Request(f"{GIST_API_URL}/{gist_id}", data=payload, method="PATCH")
+    req.add_header("Authorization", f"token {token}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/vnd.github.v3+json")
+    with urlopen(req) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data["files"]["claude_usage.json"]["raw_url"]
+
+def push_to_gist(usage_data, config):
+    """Push current usage data to a GitHub Gist. Never crashes the app."""
+    try:
+        token = config["github_token"]
+        content = json.dumps({
+            "five_hour": {
+                "utilization": usage_data["five_hour"],
+                "resets_at": usage_data["five_hour_reset"]
+            },
+            "seven_day": {
+                "utilization": usage_data["seven_day"],
+                "resets_at": usage_data["seven_day_reset"]
+            },
+            "last_updated": datetime.now().astimezone().isoformat()
+        }, indent=2)
+
+        gist_id = config.get("gist_id")
+        if gist_id:
+            _update_gist(token, gist_id, content)
+        else:
+            raw_url, gist_id = _create_gist(token, content)
+            config["gist_id"] = gist_id
+            save_config(config)
+            print(f"[Gist] Created new Gist. Raw URL: {raw_url}")
+    except (HTTPError, URLError) as e:
+        debug_log(f"Gist push failed (network): {e}")
+    except Exception as e:
+        debug_log(f"Gist push failed: {e}")
 
 def should_send_notification(usage_type, current_utilization, state):
     """Check if we should send notifications for any thresholds that were crossed
@@ -366,12 +449,14 @@ class MenuBarApp(rumps.App):
     def __init__(self):
         super(MenuBarApp, self).__init__("Usage")
         self.notification_state = load_notification_state()
+        self.gist_config = load_config()
         self.next_update_time = None
         self.menu = [
             "Update Now",
             "Check Notification State",
             "Reset Notification History",
             "Test Notification",
+            "Show Gist URL",
             None,  # Separator
             rumps.MenuItem("5-Hour Reset: Loading...", callback=None),
             rumps.MenuItem("7-Day Reset: Loading...", callback=None),
@@ -425,6 +510,28 @@ class MenuBarApp(rumps.App):
         }
         save_notification_state(self.notification_state)
         rumps.alert(title="Reset Complete", message="Notification history has been cleared")
+
+    @rumps.clicked("Show Gist URL")
+    def show_gist_url(self, _):
+        if not self.gist_config:
+            rumps.alert(
+                title="Gist Not Configured",
+                message='Add a "github_token" to config.json to enable Gist sync.\n\nExample:\n{"github_token": "ghp_xxxx", "gist_id": ""}'
+            )
+            return
+        gist_id = self.gist_config.get("gist_id")
+        if not gist_id:
+            rumps.alert(
+                title="Gist Not Created Yet",
+                message="The Gist will be created on the next usage update."
+            )
+            return
+        raw_url = f"https://gist.githubusercontent.com/raw/{gist_id}/claude_usage.json"
+        try:
+            subprocess.run(["pbcopy"], input=raw_url.encode(), check=True)
+        except Exception:
+            pass
+        rumps.alert(title="Gist URL (copied to clipboard)", message=raw_url)
 
     def update_countdown(self, _):
         """Update the countdown timer display"""
@@ -495,6 +602,13 @@ class MenuBarApp(rumps.App):
 
                 self.menu["5-Hour Reset: Loading..."].title = f"5-Hour Reset: {five_hour_reset_text} ({five_hour_abs})"
                 self.menu["7-Day Reset: Loading..."].title = f"7-Day Reset: {seven_day_reset_text} ({seven_day_abs})"
+
+                # Push to Gist if configured
+                if self.gist_config is not None:
+                    try:
+                        push_to_gist(usage_data, self.gist_config)
+                    except Exception:
+                        pass
             else:
                 usage_text = usage_text
         else:
