@@ -140,3 +140,4 @@ widget.refreshAfterDate = new Date(Date.now() + REFRESH_INTERVAL_MS)
 
 Script.setWidget(widget)
 Script.complete()
+App.close()
