@@ -66,3 +66,68 @@ Replace `YOUR_GIST_ID` at the top of the script with the `gist_id` from your `co
 - iOS controls widget background refresh (typically every 5-15 minutes)
 - Tapping the widget triggers an immediate refresh
 - The Gist feature is fully opt-in — without `config.json`, the app behaves exactly as before
+
+---
+
+## iOS Widget - Direct API (Alternative)
+
+Fetch usage data directly from Claude API without requiring the Mac app or GitHub Gist. Updates are real-time but require manually managing session credentials.
+
+### 1. Extract API credentials from Chrome
+
+1. Open Chrome DevTools (**F12**) on the [Claude usage page](https://claude.ai/settings/usage)
+2. Go to **Network** tab, filter for **usage**, refresh the page
+3. Right-click the usage request > **Copy** > **Copy as cURL**
+4. Extract these **three values** from the cURL command:
+   - **Organization ID**: From URL (`/organizations/XXXXX/usage`)
+   - **Session Key**: From Cookie header (`sessionKey=sk-ant-sid01-...`)
+   - **Device ID**: From Cookie or header (`anthropic-device-id=XXXXX`)
+
+### 2. Install Scriptable on your iPhone
+
+Download [Scriptable](https://apps.apple.com/app/scriptable/id1405459188) from the App Store.
+
+### 3. Create the widget script
+
+1. Open Scriptable > tap **+** > name it **Claude Usage Direct**
+2. Paste contents of [`claude_usage_widget_direct.js`](claude_usage_widget_direct.js)
+3. Replace the three configuration values at the top (lines 6-8):
+   ```javascript
+   const CONFIG = {
+     organization_id: "7847e6bb-4d46-4baf-9dc6-5aaae282cc8b",
+     session_key: "sk-ant-sid01-Mq4xHYnPqfiSVwWhjPYaB...",
+     device_id: "c770e5ca-d697-4bf2-bd93-4c906a881bf3"
+   }
+   ```
+
+### 4. Add the widget to your home screen
+
+Same steps as Gist-based widget:
+
+1. Long press on the home screen > tap **+**
+2. Search **Scriptable** > choose the **medium** widget > **Add Widget**
+3. Long press the widget > **Edit Widget**
+4. Set **Script** to **Claude Usage Direct**
+5. Set **When Interacting** to **Run Script**
+
+### Notes
+
+- **Pros**: Real-time updates, no Mac app dependency, no GitHub token needed
+- **Cons**: Session expires after ~30 days, must manually update credentials
+- **Security**: Session key stored in plaintext in Scriptable — don't share the script
+- **Troubleshooting**: If widget shows "API Error", session likely expired — re-extract credentials from Chrome DevTools
+
+### Choosing Between Widget Options
+
+| Feature | Gist-Based | Direct API |
+|---------|------------|------------|
+| Setup Complexity | Medium | Medium |
+| Mac App Required | Yes | No |
+| GitHub Token | Required | Not needed |
+| Update Frequency | 3-5 min delay | Real-time |
+| Maintenance | Token renewal yearly | Session renewal monthly |
+| Dependencies | Mac + Gist + Token | Just credentials |
+
+**Choose Gist-based** if you run the Mac app 24/7 and prefer set-it-and-forget-it.
+
+**Choose Direct API** if you want iOS-only solution with real-time updates.
